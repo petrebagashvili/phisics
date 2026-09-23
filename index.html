@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+  <meta charset="UTF-8">
+  <title>ბროუნის მოძრაობა, დიფუზია და მოლეკულური ურთიერთქმედება</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: #0f172a;
+      color: #f1f5f9;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #controls {
+      margin-bottom: 12px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      background: #1e293b;
+      padding: 12px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    label {
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    canvas {
+      border: 2px solid #334155;
+      background-color: #020617;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    }
+    button {
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    input[type=range] {
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="controls">
+    <div class="control-group">
+      <label for="temp">ტემპერატურა (T): <span id="tempVal">300</span> K</label>
+      <input type="range" id="temp" min="50" max="600" value="300">
+    </div>
+
+    <div class="control-group">
+      <label for="force">ურთიერთქმედება (F): <span id="forceVal">საშუალო</span></label>
+      <input type="range" id="force" min="0" max="2" step="0.1" value="1.0">
+    </div>
+
+    <button id="resetBtn">დიფუზიის გადატვირთვა</button>
+    <button id="clearTraceBtn">ტრაექტორიის წაშლა</button>
+  </div>
+
+  <canvas id="simCanvas" width="900" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const tempSlider = document.getElementById('temp');
+    const tempVal = document.getElementById('tempVal');
+    const forceSlider = document.getElementById('force');
+    const forceVal = document.getElementById('forceVal');
+    const resetBtn = document.getElementById('resetBtn');
+    const clearTraceBtn = document.getElementById('clearTraceBtn');
+
+    let temperatureFactor = 1.0;
+    let forceFactor = 1.0;
+    let pathPoints = [];
+
+    class Molecule {
+      constructor(x, y, radius, color, mass = 1.0) {
+        this.x = x;
+        this.y = y;
+        this.radius = radius;
+        this.color = color;
+        this.mass = mass;
+
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1.2 + Math.random() * 1.5;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+
+        this.fx = 0;
+        this.fy = 0;
+      }
+
+      updatePosition() {
+        // ძალების აჩქარება a = F / m
+        this.vx += (this.fx / this.mass);
+        this.vy += (this.fy / this.mass);
+
+        // სიჩქარის შეზღუდვა სტაბილურობისთვის
+        const currentSpeed = Math.hypot(this.vx, this.vy);
+        const maxSpeed = 8 * temperatureFactor;
+        if (currentSpeed > maxSpeed && currentSpeed > 0) {
+          this.vx = (this.vx / currentSpeed) * maxSpeed;
+          this.vy = (this.vy / currentSpeed) * maxSpeed;
+        }
+
+        // მოძრაობა
+        this.x += this.vx * temperatureFactor;
+        this.y += this.vy * temperatureFactor;
+
+        // ძალების გასუფთავება შემდეგი კადრისთვის
+        this.fx = 0;
+        this.fy = 0;
+
+        // კედლებთან შეჯახება
+        if (this.x - this.radius < 0) {
+          this.x = this.radius;
+          this.vx *= -1;
+        } else if (this.x + this.radius > canvas.width) {
+          this.x = canvas.width - this.radius;
+          this.vx *= -1;
+        }
+
+        if (this.y - this.radius < 0) {
+          this.y = this.radius;
+          this.vy *= -1;
+        } else if (this.y + this.radius > canvas.height) {
+          this.y = canvas.height - this.radius;
+          this.vy *= -1;
+        }
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.closePath();
+      }
+    }
+
+    let molecules = [];
+    let brownianParticle = null;
+
+    function initSimulation() {
+      molecules = [];
+      pathPoints = [];
+
+      // 1. ბროუნის დიდი ნაწილაკი (ცენტრში)
+      brownianParticle = new Molecule(canvas.width / 2, canvas.height / 2, 20, '#facc15', 30.0);
+      molecules.push(brownianParticle);
+
+      // 2. მარცხენა ზონა - ლურჯი მოლეკულები
+      for (let i = 0; i < 45; i++) {
+        const x = 30 + Math.random() * (canvas.width / 2 - 70);
+        const y = 30 + Math.random() * (canvas.height - 60);
+        molecules.push(new Molecule(x, y, 6, '#3b82f6', 1.0));
+      }
+
+      // 3. მარჯვენა ზონა - წითელი მოლეკულები
+      for (let i = 0; i < 45; i++) {
+        const x = canvas.width / 2 + 40 + Math.random() * (canvas.width / 2 - 70);
+        const y = 30 + Math.random() * (canvas.height - 60);
+        molecules.push(new Molecule(x, y, 6, '#ef4444', 1.0));
+      }
+    }
+
+    function applyIntermolecularForces() {
+      const epsilon = 0.15 * forceFactor; // ურთიერთქმედების სიძლიერე
+
+      for (let i = 0; i < molecules.length; i++) {
+        for (let j = i + 1; j < molecules.length; j++) {
+          const p1 = molecules[i];
+          const p2 = molecules[j];
+
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const dist = Math.hypot(dx, dy);
+          const r0 = p1.radius + p2.radius; // წონასწორობის/შეჯახების მანძილი
+
+          if (dist > 0 && dist < r0 * 3.5) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+
+            if (dist < r0) {
+              // 1. მკვეთრი გაზიდვის ძალა ახლო მანძილზე (Repulsion)
+              const overlap = r0 - dist;
+              const repForce = overlap * 0.8;
+              p1.fx -= nx * repForce;
+              p1.fy -= ny * repForce;
+              p2.fx += nx * repForce;
+              p2.fy += ny * repForce;
+
+              // დრეკადი შეჯახების იმპულსების გაცვლა
+              const kx = p1.vx - p2.vx;
+              const ky = p1.vy - p2.vy;
+              const p = 2 * (nx * kx + ny * ky) / (p1.mass + p2.mass);
+              p1.vx -= p * p2.mass * nx;
+              p1.vy -= p * p2.mass * ny;
+              p2.vx += p * p1.mass * nx;
+              p2.vy += p * p1.mass * ny;
+
+            } else if (forceFactor > 0) {
+              // 2. სუსტი მიზიდვის ძალა საშუალო მანძილზე (Attraction)
+              const attForce = epsilon * (1 - dist / (r0 * 3.5));
+              p1.fx += nx * attForce;
+              p1.fy += ny * attForce;
+              p2.fx -= nx * attForce;
+              p2.fy -= ny * attForce;
+            }
+          }
+        }
+      }
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // ფიზიკის განახლება
+      applyIntermolecularForces();
+      molecules.forEach(m => m.updatePosition());
+
+      // ბროუნის ნაწილაკის ტრაექტორიის ჩაწერა
+      pathPoints.push({ x: brownianParticle.x, y: brownianParticle.y });
+      if (pathPoints.length > 600) pathPoints.shift();
+
+      // ტრაექტორიის დახატვა
+      if (pathPoints.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(pathPoints[0].x, pathPoints[0].y);
+        for (let i = 1; i < pathPoints.length; i++) {
+          ctx.lineTo(pathPoints[i].x, pathPoints[i].y);
+        }
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // ნაწილაკების დახატვა
+      molecules.forEach(m => m.draw());
+
+      // წარწერა ბროუნის ნაწილაკზე
+      ctx.fillStyle = '#facc15';
+      ctx.font = 'bold 13px Arial';
+      ctx.fillText('ბროუნის ნაწილაკი', brownianParticle.x - 55, brownianParticle.y - 26);
+
+      requestAnimationFrame(animate);
+    }
+
+    // ინტერფეისის კონტროლი
+    tempSlider.addEventListener('input', (e) => {
+      const val = e.target.value;
+      tempVal.textContent = val;
+      temperatureFactor = val / 300;
+    });
+
+    forceSlider.addEventListener('input', (e) => {
+      forceFactor = parseFloat(e.target.value);
+      if (forceFactor === 0) forceVal.textContent = "გამორთული";
+      else if (forceFactor < 1) forceVal.textContent = "სუსტი";
+      else if (forceFactor === 1) forceVal.textContent = "საშუალო";
+      else forceVal.textContent = "ძლიერი";
+    });
+
+    resetBtn.addEventListener('click', initSimulation);
+    clearTraceBtn.addEventListener('click', () => { pathPoints = []; });
+
+    // გაშვება
+    initSimulation();
+    animate();
+  </script>
+</body>
+</html>
